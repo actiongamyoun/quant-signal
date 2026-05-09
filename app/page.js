@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import {
+  ComposedChart, Line, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, ReferenceLine, AreaChart, Area
+} from "recharts";
 
 // ─── 색상 ───────────────────────────────────────────────────
 const C = {
@@ -25,6 +29,127 @@ function Icon({ name, size = 20, color = C.mt, style: s = {} }) {
 
 const SECTORS = ["전체", "반도체", "배터리", "IT", "바이오", "금융", "자동차", "화학", "소재", "지주", "통신", "에너지"];
 
+// ─── 차트용 데모 데이터 생성 ─────────────────────────────────
+function generateChartData(basePrice) {
+  const data = [];
+  let p = basePrice * 0.9;
+  const now = new Date();
+  for (let i = 59; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const o = p;
+    const c = p * (1 + (Math.random() - 0.48) * 0.03);
+    const h = Math.max(o, c) * (1 + Math.random() * 0.012);
+    const l = Math.min(o, c) * (1 - Math.random() * 0.012);
+    const v = Math.floor(Math.random() * 5e6 + 5e5);
+    data.push({
+      date: `${d.getMonth() + 1}/${d.getDate()}`,
+      close: Math.round(c),
+      high: Math.round(h),
+      low: Math.round(l),
+      volume: v,
+    });
+    p = c;
+  }
+  // SMA 계산
+  return data.map((d, i, arr) => {
+    const closes = arr.map(x => x.close);
+    const sma5 = i >= 4 ? closes.slice(i - 4, i + 1).reduce((a, b) => a + b, 0) / 5 : null;
+    const sma20 = i >= 19 ? closes.slice(i - 19, i + 1).reduce((a, b) => a + b, 0) / 20 : null;
+    // RSI 간이
+    let rsi = null;
+    if (i >= 14) {
+      let ag = 0, al = 0;
+      for (let j = i - 13; j <= i; j++) {
+        const diff = closes[j] - closes[j - 1];
+        if (diff >= 0) ag += diff; else al -= diff;
+      }
+      ag /= 14; al /= 14;
+      rsi = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    }
+    return { ...d, sma5, sma20, rsi };
+  });
+}
+
+// ─── 차트 컴포넌트 ──────────────────────────────────────────
+const tt = { background: "#fff", border: "1px solid rgba(0,0,0,.08)", borderRadius: 10, fontSize: 11, padding: "8px 12px", boxShadow: "0 4px 12px rgba(0,0,0,.06)" };
+
+function StockChart({ price }) {
+  const [chartData] = useState(() => generateChartData(price || 70000));
+  const [chartTab, setChartTab] = useState("price");
+
+  return (
+    <div>
+      {/* 차트 탭 */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+        {[
+          { id: "price", label: "가격" },
+          { id: "rsi", label: "RSI" },
+          { id: "volume", label: "거래량" },
+        ].map(t => (
+          <button key={t.id} onClick={() => setChartTab(t.id)} style={{
+            padding: "5px 14px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 500,
+            background: chartTab === t.id ? C.blue : C.grey,
+            color: chartTab === t.id ? "#fff" : C.sub,
+            cursor: "pointer", fontFamily: "'Pretendard',sans-serif",
+          }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* 가격 차트 */}
+      {chartTab === "price" && (
+        <>
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={chartData} margin={{ left: -10, right: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
+              <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={8} />
+              <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} domain={["auto", "auto"]} />
+              <Tooltip contentStyle={tt} formatter={(v, n) => [v ? `₩${Math.round(v).toLocaleString()}` : "—", { close: "종가", sma5: "5일선", sma20: "20일선" }[n] || n]} />
+              <Line type="monotone" dataKey="close" stroke={C.blue} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="sma5" stroke={C.amber} strokeWidth={1.2} dot={false} strokeDasharray="4 2" />
+              <Line type="monotone" dataKey="sma20" stroke={C.purple} strokeWidth={1.2} dot={false} strokeDasharray="4 2" />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 6, fontSize: 10 }}>
+            <span style={{ color: C.blue }}>● 종가</span>
+            <span style={{ color: C.amber }}>┄ 5일선</span>
+            <span style={{ color: C.purple }}>┄ 20일선</span>
+          </div>
+        </>
+      )}
+
+      {/* RSI 차트 */}
+      {chartTab === "rsi" && (
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={chartData.filter(d => d.rsi !== null)} margin={{ left: -10, right: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
+            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={5} />
+            <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} />
+            <ReferenceLine y={70} stroke={C.red} strokeDasharray="3 3" strokeOpacity={0.4} />
+            <ReferenceLine y={30} stroke={C.green} strokeDasharray="3 3" strokeOpacity={0.4} />
+            <Tooltip contentStyle={tt} formatter={v => [v?.toFixed(1), "RSI"]} />
+            <Line type="monotone" dataKey="rsi" stroke={C.blue} strokeWidth={1.8} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      )}
+
+      {/* 거래량 차트 */}
+      {chartTab === "volume" && (
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={chartData.slice(-30)} margin={{ left: -10, right: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
+            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={4} />
+            <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} tickFormatter={v => `${(v / 10000).toFixed(0)}만`} />
+            <Tooltip contentStyle={tt} formatter={v => [v?.toLocaleString(), "거래량"]} />
+            <Bar dataKey="volume" fill={C.blue} fillOpacity={0.3} radius={[3, 3, 0, 0]} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
+// ─── 메인 앱 ────────────────────────────────────────────────
 export default function Home() {
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,39 +161,33 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [config, setConfig] = useState({ appKey: "", appSecret: "" });
 
-  // 시그널 데이터 로드
+  const cardStyle = {
+    background: C.card, borderRadius: 16,
+    boxShadow: "0 1px 3px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.02)",
+  };
+
   const loadSignals = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/signals");
       const data = await res.json();
-      if (data.signals) {
-        setSignals(data.signals);
-        setMode(data.mode || "demo");
-      }
-    } catch (err) {
-      console.error("시그널 로드 실패:", err);
-    }
+      if (data.signals) { setSignals(data.signals); setMode(data.mode || "demo"); }
+    } catch (err) { console.error(err); }
     setLoading(false);
   }, []);
 
   useEffect(() => { loadSignals(); }, [loadSignals]);
 
-  // AI 분석 요청
   const handleAnalyze = async (stock) => {
-    setAnalyzing(true);
-    setAnalysis(null);
+    setAnalyzing(true); setAnalysis(null);
     try {
       const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(stock),
       });
       const data = await res.json();
       setAnalysis(data.analysis || data.error || "분석에 실패했어요");
-    } catch (err) {
-      setAnalysis("분석 중 오류가 발생했어요");
-    }
+    } catch { setAnalysis("분석 중 오류가 발생했어요"); }
     setAnalyzing(false);
   };
 
@@ -77,26 +196,19 @@ export default function Home() {
   const strongCount = filtered.filter(s => s.probability >= 70).length;
   const avgProb = filtered.length > 0 ? Math.round(filtered.reduce((a, b) => a + b.probability, 0) / filtered.length) : 0;
 
-  // ─── 스타일 ───────────────────────────────────────────────
-  const cardStyle = {
-    background: C.card, borderRadius: 16,
-    boxShadow: "0 1px 3px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.02)",
-  };
-
   return (
     <div style={{ minHeight: "100vh", background: C.bg }}>
 
       {/* ─── Header ─── */}
       <header style={{
-        padding: "12px 20px", background: "#fff",
-        borderBottom: `1px solid ${C.bd}`,
+        padding: "12px 20px", background: "#fff", borderBottom: `1px solid ${C.bd}`,
         position: "sticky", top: 0, zIndex: 50,
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {detail && (
             <button onClick={() => { setSelected(null); setAnalysis(null); }}
-              style={{ padding: "6px 8px", borderRadius: 8, border: "none", background: C.grey, cursor: "pointer", display: "flex", alignItems: "center" }}>
+              style={{ padding: "6px 8px", borderRadius: 8, border: "none", background: C.grey, cursor: "pointer", display: "flex" }}>
               <Icon name="arrow_back" size={20} color={C.sub} />
             </button>
           )}
@@ -115,7 +227,7 @@ export default function Home() {
             background: mode === "live" ? C.greenL : C.amberL,
             display: "flex", alignItems: "center", gap: 4,
           }}>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: mode === "live" ? C.green : C.amber, display: "inline-block" }} />
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: mode === "live" ? C.green : C.amber }} />
             <span style={{ fontSize: 11, color: mode === "live" ? C.green : C.amber, fontWeight: 600 }}>{mode === "live" ? "LIVE" : "DEMO"}</span>
           </div>
           <button onClick={() => setShowSettings(!showSettings)}
@@ -125,22 +237,21 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Settings Panel */}
       {showSettings && (
         <div style={{ padding: "16px 20px", background: "#fff", borderBottom: `1px solid ${C.bd}` }} className="fade-up">
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 140 }}>
               <label style={{ fontSize: 11, color: C.mt, display: "block", marginBottom: 4 }}>KIS APP KEY</label>
               <input type="password" value={config.appKey} onChange={e => setConfig({ ...config, appKey: e.target.value })}
-                placeholder="APP KEY" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${C.bd}`, borderRadius: 10, fontSize: 13, fontFamily: "'DM Mono'", outline: "none" }} />
+                style={{ width: "100%", padding: "8px 12px", border: `1px solid ${C.bd}`, borderRadius: 10, fontSize: 13, fontFamily: "'DM Mono'", outline: "none" }} />
             </div>
             <div style={{ flex: 1, minWidth: 140 }}>
               <label style={{ fontSize: 11, color: C.mt, display: "block", marginBottom: 4 }}>KIS APP SECRET</label>
               <input type="password" value={config.appSecret} onChange={e => setConfig({ ...config, appSecret: e.target.value })}
-                placeholder="APP SECRET" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${C.bd}`, borderRadius: 10, fontSize: 13, fontFamily: "'DM Mono'", outline: "none" }} />
+                style={{ width: "100%", padding: "8px 12px", border: `1px solid ${C.bd}`, borderRadius: 10, fontSize: 13, fontFamily: "'DM Mono'", outline: "none" }} />
             </div>
           </div>
-          <p style={{ fontSize: 11, color: C.mt, marginTop: 8 }}>Vercel 환경변수로도 설정 가능해요. ANTHROPIC_API_KEY는 환경변수 전용이에요.</p>
+          <p style={{ fontSize: 11, color: C.mt, marginTop: 8 }}>Vercel 환경변수로도 설정 가능해요</p>
         </div>
       )}
 
@@ -151,25 +262,19 @@ export default function Home() {
           <div style={{ textAlign: "center", padding: "80px 20px" }} className="fade-up">
             <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
             <p style={{ fontSize: 14, color: C.sub, marginTop: 16 }}>시그널을 분석하고 있어요...</p>
-            <p style={{ fontSize: 12, color: C.mt, marginTop: 4 }}>30개 종목 데이터를 수집 중</p>
           </div>
         )}
 
         {/* ══════════ 시그널 목록 ══════════ */}
         {!loading && !detail && (<>
-
-          {/* 타이틀 */}
           <div className="fade-up" style={{ marginBottom: 20 }}>
             <p style={{ fontSize: 13, color: C.blue, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
               <Icon name="auto_awesome" size={16} color={C.blue} />
               {mode === "live" ? "실시간 데이터 분석 완료" : "데모 데이터로 분석 중"}
             </p>
-            <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, lineHeight: 1.3 }}>
-              오늘 발견한 시그널이에요
-            </h2>
+            <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, lineHeight: 1.3 }}>오늘 발견한 시그널이에요</h2>
           </div>
 
-          {/* 요약 카드 */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
             {[
               { label: "발견 종목", val: filtered.length, unit: "개", color: C.blue },
@@ -186,24 +291,18 @@ export default function Home() {
             ))}
           </div>
 
-          {/* 섹터 필터 */}
           <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 16 }}>
             {SECTORS.map(s => {
-              const hasData = s === "전체" || signals.some(sig => sig.sector === s);
-              if (!hasData) return null;
-              return (
-                <button key={s} onClick={() => setSector(s)} style={{
-                  padding: "6px 14px", borderRadius: 20, fontSize: 13, border: "none",
-                  background: sector === s ? C.blue : C.grey,
-                  color: sector === s ? "#fff" : C.sub,
-                  fontWeight: sector === s ? 600 : 500, cursor: "pointer",
-                  fontFamily: "'Pretendard'", whiteSpace: "nowrap", transition: "all .15s",
-                }}>{s}</button>
-              );
+              const has = s === "전체" || signals.some(sig => sig.sector === s);
+              if (!has) return null;
+              return <button key={s} onClick={() => setSector(s)} style={{
+                padding: "6px 14px", borderRadius: 20, fontSize: 13, border: "none",
+                background: sector === s ? C.blue : C.grey, color: sector === s ? "#fff" : C.sub,
+                fontWeight: sector === s ? 600 : 500, cursor: "pointer", fontFamily: "'Pretendard',sans-serif", whiteSpace: "nowrap",
+              }}>{s}</button>;
             })}
           </div>
 
-          {/* 설정 바 */}
           <div className="fade-up" style={{
             display: "flex", alignItems: "center", gap: 8,
             padding: "10px 14px", background: C.blueL, borderRadius: 12, marginBottom: 14,
@@ -212,69 +311,46 @@ export default function Home() {
             <span style={{ fontSize: 12, color: C.blueD, fontWeight: 500 }}>
               목표수익 <strong>+15%</strong> · 보유기간 <strong>20일</strong> 기준
             </span>
-            <Icon name="chevron_right" size={18} color={C.blue} style={{ marginLeft: "auto" }} />
           </div>
 
-          {/* 시그널 카드 리스트 */}
           {filtered.map((s, i) => (
             <div key={s.code} className="fade-up" style={{
               ...cardStyle, padding: 20, marginBottom: 10, cursor: "pointer",
               display: "flex", alignItems: "center", gap: 16,
-              animationDelay: `${i * 0.04}s`, transition: "all .2s",
-            }}
-              onClick={() => { setSelected(s.code); setAnalysis(null); }}>
-
-              {/* 확률 링 */}
+              animationDelay: `${i * 0.04}s`,
+            }} onClick={() => { setSelected(s.code); setAnalysis(null); }}>
               <div style={{ position: "relative", flexShrink: 0 }}>
                 <svg width="56" height="56" viewBox="0 0 56 56" style={{ transform: "rotate(-90deg)" }}>
                   <circle cx="28" cy="28" r="23" fill="none" stroke={C.grey} strokeWidth="4" />
-                  <circle cx="28" cy="28" r="23" fill="none"
-                    stroke={probColor(s.probability)} strokeWidth="4"
-                    strokeDasharray={`${(s.probability / 100) * 144.5} 144.5`}
-                    strokeLinecap="round" />
+                  <circle cx="28" cy="28" r="23" fill="none" stroke={probColor(s.probability)} strokeWidth="4"
+                    strokeDasharray={`${(s.probability / 100) * 144.5} 144.5`} strokeLinecap="round" />
                 </svg>
-                <div style={{
-                  position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-                  fontFamily: "'DM Mono'", fontSize: 15, fontWeight: 700, color: probColor(s.probability),
-                }}>{s.probability}</div>
+                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontFamily: "'DM Mono'", fontSize: 15, fontWeight: 700, color: probColor(s.probability) }}>{s.probability}</div>
               </div>
-
-              {/* 종목 정보 */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                   <span style={{ fontSize: 15, fontWeight: 700 }}>{s.name}</span>
-                  <span style={{
-                    padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 600,
-                    background: probBg(s.probability), color: probColor(s.probability),
-                  }}>{probLabel(s.probability)}</span>
+                  <span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: probBg(s.probability), color: probColor(s.probability) }}>{probLabel(s.probability)}</span>
                 </div>
                 <div style={{ fontSize: 12.5, color: C.sub, lineHeight: 1.4 }}>{s.reason}</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
                   <span className="mono" style={{ fontSize: 12, color: C.tx, fontWeight: 500 }}>₩{s.price?.toLocaleString()}</span>
-                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: s.chg >= 0 ? C.green : C.red }}>
-                    {s.chg >= 0 ? "+" : ""}{s.chg}%
-                  </span>
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: s.chg >= 0 ? C.green : C.red }}>{s.chg >= 0 ? "+" : ""}{s.chg}%</span>
                   <span style={{ fontSize: 11, color: C.lt }}>·</span>
                   <span style={{ fontSize: 11, color: C.mt }}>스코어 {s.score}</span>
                 </div>
               </div>
-
               <Icon name="chevron_right" size={22} color={C.lt} style={{ flexShrink: 0 }} />
             </div>
           ))}
 
-          {/* 하단 */}
           <div style={{ padding: "16px 0", textAlign: "center" }}>
-            <p style={{ fontSize: 11, color: C.lt, lineHeight: 1.6 }}>
-              확률은 과거 데이터 기반 통계 추정값이에요<br />투자 판단은 본인의 책임이에요
-            </p>
+            <p style={{ fontSize: 11, color: C.lt, lineHeight: 1.6 }}>확률은 과거 데이터 기반 통계 추정값이에요<br />투자 판단은 본인의 책임이에요</p>
             <button onClick={loadSignals} style={{
               marginTop: 12, padding: "10px 20px", borderRadius: 12, border: "none",
-              background: C.grey, color: C.sub, fontSize: 13, fontWeight: 500,
-              cursor: "pointer", fontFamily: "'Pretendard'",
+              background: C.grey, color: C.sub, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "'Pretendard',sans-serif",
             }}>
-              <Icon name="refresh" size={16} color={C.sub} style={{ verticalAlign: -3, marginRight: 4 }} />
-              새로고침
+              <Icon name="refresh" size={16} color={C.sub} style={{ verticalAlign: -3, marginRight: 4 }} />새로고침
             </button>
           </div>
         </>)}
@@ -282,13 +358,12 @@ export default function Home() {
         {/* ══════════ 종목 상세 ══════════ */}
         {!loading && detail && (
           <div className="fade-up">
-
             {/* 종목 헤더 */}
             <div style={{ ...cardStyle, padding: 24, marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                    <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>{detail.name}</span>
+                    <span style={{ fontSize: 20, fontWeight: 800 }}>{detail.name}</span>
                     <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, background: C.purpleL, color: C.purple }}>{detail.sector}</span>
                   </div>
                   <span className="mono" style={{ fontSize: 12, color: C.mt }}>{detail.code}</span>
@@ -296,35 +371,33 @@ export default function Home() {
                 <div style={{ position: "relative" }}>
                   <svg width="80" height="80" viewBox="0 0 80 80" style={{ transform: "rotate(-90deg)" }}>
                     <circle cx="40" cy="40" r="33" fill="none" stroke={C.grey} strokeWidth="5" />
-                    <circle cx="40" cy="40" r="33" fill="none"
-                      stroke={probColor(detail.probability)} strokeWidth="5"
-                      strokeDasharray={`${(detail.probability / 100) * 207.3} 207.3`}
-                      strokeLinecap="round" />
+                    <circle cx="40" cy="40" r="33" fill="none" stroke={probColor(detail.probability)} strokeWidth="5"
+                      strokeDasharray={`${(detail.probability / 100) * 207.3} 207.3`} strokeLinecap="round" />
                   </svg>
-                  <div style={{
-                    position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-                    fontFamily: "'DM Mono'", fontSize: 22, fontWeight: 700, color: probColor(detail.probability),
-                  }}>{detail.probability}%</div>
+                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontFamily: "'DM Mono'", fontSize: 22, fontWeight: 700, color: probColor(detail.probability) }}>{detail.probability}%</div>
                 </div>
               </div>
-
               <div style={{ marginTop: 16 }}>
                 <div className="mono" style={{ fontSize: 30, fontWeight: 700, letterSpacing: -1 }}>₩{detail.price?.toLocaleString()}</div>
-                <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: detail.chg >= 0 ? C.green : C.red }}>
-                  {detail.chg >= 0 ? "+" : ""}{detail.chg}%
-                </span>
+                <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: detail.chg >= 0 ? C.green : C.red }}>{detail.chg >= 0 ? "+" : ""}{detail.chg}%</span>
               </div>
-
-              <div style={{
-                marginTop: 14, padding: "12px 14px", background: probBg(detail.probability),
-                borderRadius: 12, display: "flex", alignItems: "center", gap: 10,
-              }}>
+              <div style={{ marginTop: 14, padding: "12px 14px", background: probBg(detail.probability), borderRadius: 12, display: "flex", alignItems: "center", gap: 10 }}>
                 <Icon name="auto_awesome" size={20} color={probColor(detail.probability)} />
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: probColor(detail.probability) }}>{probDesc(detail.probability)}</div>
                   <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>{detail.reason}</div>
                 </div>
               </div>
+            </div>
+
+            {/* ★ 차트 ★ */}
+            <div style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+                <Icon name="candlestick_chart" size={20} color={C.blue} />
+                <span style={{ fontSize: 15, fontWeight: 700 }}>차트</span>
+                <span style={{ fontSize: 11, color: C.mt, marginLeft: "auto" }}>60일</span>
+              </div>
+              <StockChart price={detail.price} />
             </div>
 
             {/* 스코어 분해 */}
@@ -390,7 +463,7 @@ export default function Home() {
                   <div key={i} style={{ flex: 1, textAlign: "center" }}>
                     <Icon name={m.icon} size={20} color={C.mt} />
                     <div style={{ fontSize: 10, color: C.mt, marginTop: 4, marginBottom: 2 }}>{m.label}</div>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: C.tx }}>{m.val}</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 700 }}>{m.val}</div>
                   </div>
                 ))}
               </div>
@@ -420,11 +493,12 @@ export default function Home() {
               </div>
             </div>
 
-            {/* AI 분석 버튼 + 결과 */}
+            {/* AI 분석 */}
             <div style={{ ...cardStyle, padding: 24, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
                 <Icon name="psychology" size={20} color={C.blue} />
                 <span style={{ fontSize: 15, fontWeight: 700 }}>AI 분석</span>
+                <span style={{ fontSize: 11, color: C.mt, marginLeft: "auto" }}>뉴스 · 시황 반영</span>
               </div>
 
               {!analysis && !analyzing && (
@@ -432,18 +506,18 @@ export default function Home() {
                   width: "100%", padding: "14px 0", borderRadius: 14, border: "none",
                   background: `linear-gradient(135deg, ${C.blue}, #00b4d8)`,
                   color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer",
-                  fontFamily: "'Pretendard'", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  fontFamily: "'Pretendard',sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   boxShadow: "0 4px 16px rgba(49,130,246,.25)",
                 }}>
                   <Icon name="auto_awesome" size={20} color="#fff" />
-                  AI에게 이 종목 분석 요청
+                  AI에게 분석 요청 (뉴스 포함)
                 </button>
               )}
 
               {analyzing && (
                 <div style={{ textAlign: "center", padding: "20px 0" }}>
                   <span className="spinner" />
-                  <p style={{ fontSize: 13, color: C.sub, marginTop: 10 }}>AI가 분석하고 있어요...</p>
+                  <p style={{ fontSize: 13, color: C.sub, marginTop: 10 }}>AI가 뉴스와 차트를 종합 분석하고 있어요...</p>
                 </div>
               )}
 
