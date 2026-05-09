@@ -40,10 +40,8 @@ function recalcWithSettings(detail,settings){
   return{...detail,score,probability};
 }
 
-// ─── 이평선 색상 ─────────────────────────────────────────────
 const MA={sma5:{label:"5일",color:"#ff6b6b"},sma20:{label:"20일",color:"#ffa94d"},sma60:{label:"60일",color:"#51cf66"},sma120:{label:"120일",color:"#845ef7"}};
 
-// ─── SMA/RSI 계산 ────────────────────────────────────────────
 function addIndicators(chartData){
   const closes=chartData.map(d=>d.close);
   function sma(arr,per){return arr.map((_,i)=>{if(i<per-1)return null;let s=0;for(let j=i-per+1;j<=i;j++)s+=arr[j];return Math.round(s/per)})}
@@ -53,7 +51,6 @@ function addIndicators(chartData){
   return chartData.map((d,i)=>({...d,sma5:s5[i],sma20:s20[i],sma60:s60[i],sma120:s120[i],rsi:rsiArr[i]!==null?Math.round(rsiArr[i]*10)/10:null}));
 }
 
-// ─── 차트 컴포넌트 ──────────────────────────────────────────
 function StockChart({chartData:raw}){
   const enriched=addIndicators(raw);
   const displayData=enriched.slice(-60);
@@ -69,7 +66,6 @@ function StockChart({chartData:raw}){
       <button onClick={()=>setShowRsi(!showRsi)} style={{padding:"4px 10px",borderRadius:6,border:`1.5px solid ${showRsi?C.blue:C.bd}`,background:showRsi?C.blueL:"transparent",color:showRsi?C.blue:C.lt,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Pretendard'"}}>RSI</button>
       <button onClick={()=>setShowVol(!showVol)} style={{padding:"4px 10px",borderRadius:6,border:`1.5px solid ${showVol?C.purple:C.bd}`,background:showVol?C.purpleL:"transparent",color:showVol?C.purple:C.lt,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Pretendard'"}}>거래량</button>
     </div>
-
     <ResponsiveContainer width="100%" height={240}>
       <ComposedChart data={displayData} margin={{left:-10,right:4}}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)"/>
@@ -90,13 +86,11 @@ function StockChart({chartData:raw}){
       {ma.sma60&&<span style={{color:MA.sma60.color}}>┄ 60일</span>}
       {ma.sma120&&<span style={{color:MA.sma120.color}}>┄ 120일</span>}
     </div>
-
     {showRsi&&<div style={{paddingTop:8,borderTop:`1px solid ${C.grey}`}}>
       <div style={{fontSize:10,color:C.mt,fontWeight:600,marginBottom:4}}>RSI (14)</div>
       <ResponsiveContainer width="100%" height={100}>
         <ComposedChart data={displayData} margin={{left:-10,right:4}}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.04)"/>
-          <XAxis dataKey="date" hide/>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.04)"/><XAxis dataKey="date" hide/>
           <YAxis stroke={C.lt} fontSize={8} tick={{fill:C.mt}} domain={[0,100]} ticks={[30,50,70]}/>
           <ReferenceLine y={70} stroke={C.red} strokeDasharray="3 3" strokeOpacity={.35}/>
           <ReferenceLine y={30} stroke={C.green} strokeDasharray="3 3" strokeOpacity={.35}/>
@@ -105,19 +99,33 @@ function StockChart({chartData:raw}){
         </ComposedChart>
       </ResponsiveContainer>
     </div>}
-
     {showVol&&<div style={{paddingTop:8,borderTop:`1px solid ${C.grey}`}}>
       <div style={{fontSize:10,color:C.mt,fontWeight:600,marginBottom:4}}>거래량</div>
       <ResponsiveContainer width="100%" height={80}>
         <ComposedChart data={displayData} margin={{left:-10,right:4}}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.04)"/>
-          <XAxis dataKey="date" hide/>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.04)"/><XAxis dataKey="date" hide/>
           <YAxis stroke={C.lt} fontSize={8} tick={{fill:C.mt}} tickFormatter={v=>`${(v/10000).toFixed(0)}만`}/>
           <Tooltip contentStyle={tt} formatter={v=>[v?.toLocaleString(),"거래량"]}/>
           <Bar dataKey="volume" fill={C.purple} fillOpacity={.25} radius={[2,2,0,0]}/>
         </ComposedChart>
       </ResponsiveContainer>
     </div>}
+  </div>);
+}
+
+// ─── 준비중 카드 컴포넌트 ────────────────────────────────────
+function ComingSoon({icon,title}){
+  return(<div style={{...cs,padding:24,marginBottom:12}}>
+    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14}}>
+      <Icon name={icon} size={20} color={C.mt}/>
+      <span style={{fontSize:15,fontWeight:700,color:C.mt}}>{title}</span>
+      <span style={{padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:600,background:C.amberL,color:C.amber,marginLeft:"auto"}}>준비중</span>
+    </div>
+    <div style={{textAlign:"center",padding:"16px 0"}}>
+      <Icon name="construction" size={36} color={C.lt}/>
+      <p style={{fontSize:13,color:C.sub,marginTop:8,fontWeight:500}}>이 기능을 준비하고 있어요</p>
+      <p style={{fontSize:11,color:C.mt,marginTop:4}}>데이터 수집 인프라 구축 후 제공 예정</p>
+    </div>
   </div>);
 }
 
@@ -144,6 +152,7 @@ function SettingsPage({settings,setSettings,onClose}){
 
   return(<div className="fade-up">
     <div style={{marginBottom:20}}><p style={{fontSize:13,color:C.blue,fontWeight:600,marginBottom:4,display:"flex",alignItems:"center",gap:4}}><Icon name="tune" size={16} color={C.blue}/>나만의 시그널 설정</p><h2 style={{fontSize:22,fontWeight:800,letterSpacing:-.5}}>투자 스타일에 맞게 조절하세요</h2></div>
+
     <div style={{...cs,padding:24,marginBottom:12}}>
       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:18}}><Icon name="target" size={20} color={C.green}/><span style={{fontSize:15,fontWeight:700}}>전략 설정</span></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
@@ -153,6 +162,7 @@ function SettingsPage({settings,setSettings,onClose}){
       <div style={{marginTop:16}}><EqSlider icon="security" label="최소 확률 필터" desc="이 확률 이상만 표시" value={local.minProbability} onChange={v=>u("minProbability",v)} min={20} max={80} unit="%" color={C.green}/></div>
       <EqSlider icon="do_not_disturb_on" label="손절 라인" desc="목표 손절 비율" value={local.stopLoss} onChange={v=>u("stopLoss",v)} min={2} max={15} unit="%" color={C.red}/>
     </div>
+
     <div style={{...cs,padding:24,marginBottom:12}}>
       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}><Icon name="equalizer" size={20} color={C.blue}/><span style={{fontSize:15,fontWeight:700}}>피처 가중치</span></div>
       <p style={{fontSize:12,color:C.mt,marginBottom:18}}>어떤 지표를 더 중요하게 볼 건지 조절하세요</p>
@@ -163,6 +173,17 @@ function SettingsPage({settings,setSettings,onClose}){
       <EqSlider icon="compress" label="변동성 수축" desc="볼린저밴드 수축도" value={local.w_volContraction} onChange={v=>u("w_volContraction",v)} max={50} unit="%" color={C.amber}/>
       <EqSlider icon="group_work" label="섹터 상대강도" desc="업종 내 위치" value={local.w_sectorRS} onChange={v=>u("w_sectorRS",v)} max={50} unit="%" color={C.red}/>
     </div>
+
+    <div style={{...cs,padding:24,marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}><Icon name="filter_alt" size={20} color={C.purple}/><span style={{fontSize:15,fontWeight:700}}>최소 기준값</span></div>
+      <p style={{fontSize:12,color:C.mt,marginBottom:18}}>각 지표가 이 값 이상이어야 포함</p>
+      <EqSlider icon="trending_up" label="돌파 거리 최소" desc="이 점수 이상만" value={local.min_breakout} onChange={v=>u("min_breakout",v)} color={C.blue}/>
+      <EqSlider icon="bar_chart" label="거래량 Z 최소" desc="이 점수 이상만" value={local.min_volumeZ} onChange={v=>u("min_volumeZ",v)} color={C.green}/>
+      <EqSlider icon="show_chart" label="추세 강도 최소" desc="이 점수 이상만" value={local.min_trend} onChange={v=>u("min_trend",v)} color={C.purple}/>
+      <EqSlider icon="compress" label="변동성 수축 최소" desc="이 점수 이상만" value={local.min_volContraction} onChange={v=>u("min_volContraction",v)} color={C.amber}/>
+      <EqSlider icon="group_work" label="섹터 강도 최소" desc="이 점수 이상만" value={local.min_sectorRS} onChange={v=>u("min_sectorRS",v)} color={C.red}/>
+    </div>
+
     <div style={{...cs,padding:20,marginBottom:12}}>
       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14}}><Icon name="bookmarks" size={20} color={C.amber}/><span style={{fontSize:15,fontWeight:700}}>프리셋</span></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
@@ -171,6 +192,7 @@ function SettingsPage({settings,setSettings,onClose}){
         )}
       </div>
     </div>
+
     <div style={{display:"flex",gap:10,position:"sticky",bottom:16,zIndex:10}}>
       <button onClick={()=>setLocal({...DEFAULT_SETTINGS})} style={{flex:1,padding:"14px 0",borderRadius:14,border:`1px solid ${C.bd}`,background:C.card,color:C.sub,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'Pretendard'"}}>초기화</button>
       <button onClick={apply} style={{flex:2,padding:"14px 0",borderRadius:14,border:"none",background:C.blue,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Pretendard'",boxShadow:"0 4px 16px rgba(49,130,246,.25)"}}>적용하기</button>
@@ -203,16 +225,12 @@ export default function Home(){
 
   useEffect(()=>{loadSignals()},[loadSignals]);
 
-  // ★ 종목 클릭 → 상세 API 호출
   const handleSelectStock=async(stock)=>{
     setDetail(null);setAnalysis(null);setDetailLoading(true);setPage("detail");
     try{
       const res=await fetch("/api/detail",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:stock.code,name:stock.name})});
       const data=await res.json();
-      if(data.detail){
-        const d=recalcWithSettings(data.detail,settings);
-        setDetail(d);
-      }
+      if(data.detail){setDetail(recalcWithSettings(data.detail,settings))}
     }catch(e){console.error(e)}
     setDetailLoading(false);
   };
@@ -225,7 +243,6 @@ export default function Home(){
   };
 
   const filtered=sector==="전체"?signals:signals.filter(s=>s.sector===sector);
-  const SECTORS_AVAIL=["전체",...[...new Set(signals.map(s=>s.sector).filter(Boolean).filter(s=>s!=="—"))]];
 
   return(<div style={{minHeight:"100vh",background:C.bg}}>
     {/* Header */}
@@ -246,13 +263,11 @@ export default function Home(){
 
     <main style={{padding:"20px 20px 40px",maxWidth:640,margin:"0 auto"}}>
 
-      {/* 로딩 */}
       {loading&&<div style={{textAlign:"center",padding:"80px 20px"}} className="fade-up"><span className="spinner" style={{width:32,height:32,borderWidth:3}}/><p style={{fontSize:14,color:C.sub,marginTop:16}}>시그널 후보를 스캔하고 있어요...</p><p style={{fontSize:12,color:C.mt,marginTop:4}}>거래량 상위 · 등락률 상위 종목 탐색 중</p></div>}
 
-      {/* 설정 */}
       {!loading&&page==="settings"&&<SettingsPage settings={settings} setSettings={setSettings} onClose={()=>setPage("main")}/>}
 
-      {/* ═══ 시그널 후보 목록 (1단계) ═══ */}
+      {/* ═══ 시그널 후보 목록 ═══ */}
       {!loading&&page==="main"&&(<>
         <div className="fade-up" style={{marginBottom:20}}>
           <p style={{fontSize:13,color:C.blue,fontWeight:600,marginBottom:4,display:"flex",alignItems:"center",gap:4}}><Icon name="auto_awesome" size={16} color={C.blue}/>{mode==="live"?"실시간 시장 스캔 완료":"데모 데이터로 분석 중"}</p>
@@ -272,21 +287,15 @@ export default function Home(){
           <Icon name="chevron_right" size={16} color={C.blue} style={{marginLeft:"auto"}}/>
         </div>
 
+        {filtered.length===0&&<div style={{textAlign:"center",padding:"40px 20px"}}><Icon name="search_off" size={48} color={C.lt}/><p style={{fontSize:14,color:C.sub,marginTop:12}}>현재 설정으로는 시그널이 없어요</p><button onClick={()=>setPage("settings")} style={{marginTop:12,padding:"10px 20px",borderRadius:12,border:"none",background:C.blue,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'Pretendard'"}}>설정 변경</button></div>}
+
         {filtered.map((s,i)=>(
           <div key={s.code} className="fade-up" style={{...cs,padding:20,marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:16,animationDelay:`${i*.04}s`}} onClick={()=>handleSelectStock(s)}>
-            <div style={{position:"relative",flexShrink:0}}>
-              <svg width="56" height="56" viewBox="0 0 56 56" style={{transform:"rotate(-90deg)"}}><circle cx="28" cy="28" r="23" fill="none" stroke={C.grey} strokeWidth="4"/><circle cx="28" cy="28" r="23" fill="none" stroke={probColor(s.probability)} strokeWidth="4" strokeDasharray={`${(s.probability/100)*144.5} 144.5`} strokeLinecap="round"/></svg>
-              <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",fontFamily:"'DM Mono'",fontSize:15,fontWeight:700,color:probColor(s.probability)}}>{s.probability}</div>
-            </div>
+            <div style={{position:"relative",flexShrink:0}}><svg width="56" height="56" viewBox="0 0 56 56" style={{transform:"rotate(-90deg)"}}><circle cx="28" cy="28" r="23" fill="none" stroke={C.grey} strokeWidth="4"/><circle cx="28" cy="28" r="23" fill="none" stroke={probColor(s.probability)} strokeWidth="4" strokeDasharray={`${(s.probability/100)*144.5} 144.5`} strokeLinecap="round"/></svg><div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",fontFamily:"'DM Mono'",fontSize:15,fontWeight:700,color:probColor(s.probability)}}>{s.probability}</div></div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}><span style={{fontSize:15,fontWeight:700}}>{s.name}</span><span style={{padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:600,background:probBg(s.probability),color:probColor(s.probability)}}>{probLabel(s.probability)}</span></div>
               <div style={{fontSize:12.5,color:C.sub}}>{s.reason}</div>
-              <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}>
-                <span className="mono" style={{fontSize:12,fontWeight:500}}>₩{s.price?.toLocaleString()}</span>
-                <span className="mono" style={{fontSize:12,fontWeight:600,color:s.chg>=0?C.green:C.red}}>{s.chg>=0?"+":""}{s.chg}%</span>
-                <span style={{fontSize:11,color:C.lt}}>·</span>
-                <span style={{fontSize:11,color:C.mt}}>거래량 {s.volRatio}x</span>
-              </div>
+              <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}><span className="mono" style={{fontSize:12,fontWeight:500}}>₩{s.price?.toLocaleString()}</span><span className="mono" style={{fontSize:12,fontWeight:600,color:s.chg>=0?C.green:C.red}}>{s.chg>=0?"+":""}{s.chg}%</span><span style={{fontSize:11,color:C.lt}}>·</span><span style={{fontSize:11,color:C.mt}}>거래량 {s.volRatio}x</span></div>
             </div>
             <Icon name="chevron_right" size={22} color={C.lt} style={{flexShrink:0}}/>
           </div>
@@ -303,6 +312,7 @@ export default function Home(){
         {detailLoading&&<div style={{textAlign:"center",padding:"60px 20px"}}><span className="spinner" style={{width:32,height:32,borderWidth:3}}/><p style={{fontSize:14,color:C.sub,marginTop:16}}>종목 데이터를 수집하고 있어요...</p><p style={{fontSize:12,color:C.mt,marginTop:4}}>120일 일봉 + 스코어링 계산 중</p></div>}
 
         {!detailLoading&&detail&&(<>
+          {/* 종목 헤더 */}
           <div style={{...cs,padding:24,marginBottom:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
               <div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}><span style={{fontSize:20,fontWeight:800}}>{detail.name}</span>{detail.sector&&detail.sector!=="—"&&<span style={{padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:600,background:C.purpleL,color:C.purple}}>{detail.sector}</span>}</div><span className="mono" style={{fontSize:12,color:C.mt}}>{detail.code}</span></div>
@@ -312,7 +322,7 @@ export default function Home(){
             <div style={{marginTop:14,padding:"12px 14px",background:probBg(detail.probability),borderRadius:12,display:"flex",alignItems:"center",gap:10}}><Icon name="auto_awesome" size={20} color={probColor(detail.probability)}/><div><div style={{fontSize:13,fontWeight:600,color:probColor(detail.probability)}}>{probDesc(detail.probability)}</div><div style={{fontSize:12,color:C.sub,marginTop:2}}>{detail.reason}</div></div></div>
           </div>
 
-          {/* 차트 (실제 데이터) */}
+          {/* 차트 */}
           {detail.chartData&&<div style={{...cs,padding:20,marginBottom:12}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14}}><Icon name="candlestick_chart" size={20} color={C.blue}/><span style={{fontSize:15,fontWeight:700}}>차트</span><span style={{fontSize:11,color:C.mt,marginLeft:"auto"}}>{mode==="live"?"실제 데이터":"데모 데이터"} · 120일</span></div>
             <StockChart chartData={detail.chartData}/>
@@ -336,17 +346,22 @@ export default function Home(){
             </div>)}
           </div>}
 
-          {/* 매매 가이드 */}
+          {/* 매매 참고 (하드코딩 제거, 설정값 기반만) */}
           <div style={{...cs,padding:24,marginBottom:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:16}}><Icon name="assistant_navigation" size={20} color={C.green}/><span style={{fontSize:15,fontWeight:700}}>매매 가이드</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:16}}><Icon name="assistant_navigation" size={20} color={C.green}/><span style={{fontSize:15,fontWeight:700}}>매매 참고</span></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
               <div style={{padding:16,background:C.greenL,borderRadius:14}}><div style={{display:"flex",alignItems:"center",gap:4,marginBottom:8}}><Icon name="flag" size={16} color={C.green}/><span style={{fontSize:11,color:C.green,fontWeight:600}}>목표가 (+{settings.targetReturn}%)</span></div><div className="mono" style={{fontSize:22,fontWeight:700,color:C.green}}>₩{Math.round(detail.price*(1+settings.targetReturn/100)).toLocaleString()}</div></div>
               <div style={{padding:16,background:C.redL,borderRadius:14}}><div style={{display:"flex",alignItems:"center",gap:4,marginBottom:8}}><Icon name="shield" size={16} color={C.red}/><span style={{fontSize:11,color:C.red,fontWeight:600}}>손절가 (-{settings.stopLoss}%)</span></div><div className="mono" style={{fontSize:22,fontWeight:700,color:C.red}}>₩{Math.round(detail.price*(1-settings.stopLoss/100)).toLocaleString()}</div></div>
             </div>
             <div style={{display:"flex",gap:16,padding:"12px 0"}}>
-              {[{icon:"schedule",label:"보유기간",val:`${settings.holdingDays}일`},{icon:"balance",label:"손익비",val:`${(settings.targetReturn/settings.stopLoss).toFixed(1)}:1`},{icon:"pie_chart",label:"권장비중",val:"10%"}].map((m,i)=><div key={i} style={{flex:1,textAlign:"center"}}><Icon name={m.icon} size={20} color={C.mt}/><div style={{fontSize:10,color:C.mt,marginTop:4,marginBottom:2}}>{m.label}</div><div className="mono" style={{fontSize:15,fontWeight:700}}>{m.val}</div></div>)}
+              <div style={{flex:1,textAlign:"center"}}><Icon name="schedule" size={20} color={C.mt}/><div style={{fontSize:10,color:C.mt,marginTop:4,marginBottom:2}}>보유기간</div><div className="mono" style={{fontSize:15,fontWeight:700}}>{settings.holdingDays}일</div></div>
+              <div style={{flex:1,textAlign:"center"}}><Icon name="balance" size={20} color={C.mt}/><div style={{fontSize:10,color:C.mt,marginTop:4,marginBottom:2}}>손익비</div><div className="mono" style={{fontSize:15,fontWeight:700}}>{(settings.targetReturn/settings.stopLoss).toFixed(1)} : 1</div></div>
             </div>
+            <div style={{fontSize:11,color:C.mt,marginTop:8,textAlign:"center"}}>목표가 · 손절가는 설정값 기준 계산이에요</div>
           </div>
+
+          {/* 백테스트 → 준비중 */}
+          <ComingSoon icon="history" title="백테스트 성과"/>
 
           {/* AI 분석 */}
           <div style={{...cs,padding:24,marginBottom:12}}>
@@ -356,7 +371,7 @@ export default function Home(){
             {analysis&&!analyzing&&<div className="fade-in" style={{fontSize:13,lineHeight:2,color:C.tx,whiteSpace:"pre-wrap",wordBreak:"keep-all"}}>{analysis}</div>}
           </div>
 
-          <div style={{padding:"14px 16px",background:C.amberL,borderRadius:14,display:"flex",alignItems:"flex-start",gap:10}}><Icon name="info" size={20} color={C.amber} style={{flexShrink:0,marginTop:1}}/><div style={{fontSize:12,color:C.sub,lineHeight:1.7}}>확률은 과거 데이터 기반 통계 추정값이며 미래 수익을 보장하지 않아요.</div></div>
+          <div style={{padding:"14px 16px",background:C.amberL,borderRadius:14,display:"flex",alignItems:"flex-start",gap:10}}><Icon name="info" size={20} color={C.amber} style={{flexShrink:0,marginTop:1}}/><div style={{fontSize:12,color:C.sub,lineHeight:1.7}}>확률은 규칙 기반 스코어링 추정값이며 미래 수익을 보장하지 않아요. 투자 판단은 본인의 책임이에요.</div></div>
         </>)}
       </div>)}
     </main>
