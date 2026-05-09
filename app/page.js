@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, ReferenceLine, AreaChart, Area
+  CartesianGrid, ReferenceLine
 } from "recharts";
 
 // ─── 색상 ───────────────────────────────────────────────────
@@ -29,122 +29,355 @@ function Icon({ name, size = 20, color = C.mt, style: s = {} }) {
 
 const SECTORS = ["전체", "반도체", "배터리", "IT", "바이오", "금융", "자동차", "화학", "소재", "지주", "통신", "에너지"];
 
-// ─── 차트용 데모 데이터 생성 ─────────────────────────────────
+const cardStyle = {
+  background: C.card, borderRadius: 16,
+  boxShadow: "0 1px 3px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.02)",
+};
+const tt = { background: "#fff", border: "1px solid rgba(0,0,0,.08)", borderRadius: 10, fontSize: 11, padding: "8px 12px", boxShadow: "0 4px 12px rgba(0,0,0,.06)" };
+
+// ─── 기본 설정값 ─────────────────────────────────────────────
+const DEFAULT_SETTINGS = {
+  // 가중치 (합계 100)
+  w_breakout: 25,
+  w_volumeZ: 20,
+  w_trend: 25,
+  w_volContraction: 15,
+  w_sectorRS: 15,
+  // 최소 기준값 (이 이상이어야 시그널에 포함)
+  min_breakout: 40,
+  min_volumeZ: 30,
+  min_trend: 40,
+  min_volContraction: 30,
+  min_sectorRS: 30,
+  // 전략
+  targetReturn: 15,
+  holdingDays: 20,
+  minProbability: 40,
+  stopLoss: 5,
+};
+
+function loadSettings() {
+  try {
+    const s = localStorage.getItem("qs_settings");
+    return s ? { ...DEFAULT_SETTINGS, ...JSON.parse(s) } : { ...DEFAULT_SETTINGS };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+
+function saveSettings(s) {
+  try { localStorage.setItem("qs_settings", JSON.stringify(s)); } catch {}
+}
+
+// ─── 설정 기반 스코어 재계산 ─────────────────────────────────
+function recalcScore(signal, settings) {
+  const f = signal.features;
+  if (!f) return signal;
+
+  const totalW = settings.w_breakout + settings.w_volumeZ + settings.w_trend + settings.w_volContraction + settings.w_sectorRS;
+  if (totalW === 0) return signal;
+
+  const score = Math.round(
+    (f.breakout * settings.w_breakout +
+     f.volumeZ * settings.w_volumeZ +
+     f.trend * settings.w_trend +
+     f.volContraction * settings.w_volContraction +
+     f.sectorRS * settings.w_sectorRS) / totalW
+  );
+
+  const x = (score - 50) / 20;
+  const probability = Math.round((1 / (1 + Math.exp(-x))) * 100 * 0.9 + 5);
+
+  return { ...signal, score, probability };
+}
+
+function filterBySettings(signals, settings) {
+  return signals
+    .filter(s => {
+      const f = s.features;
+      if (!f) return true;
+      return (
+        f.breakout >= settings.min_breakout &&
+        f.volumeZ >= settings.min_volumeZ &&
+        f.trend >= settings.min_trend &&
+        f.volContraction >= settings.min_volContraction &&
+        f.sectorRS >= settings.min_sectorRS
+      );
+    })
+    .map(s => recalcScore(s, settings))
+    .filter(s => s.probability >= settings.minProbability)
+    .sort((a, b) => b.probability - a.probability);
+}
+
+// ─── 차트 데모 데이터 ────────────────────────────────────────
 function generateChartData(basePrice) {
-  const data = [];
-  let p = basePrice * 0.9;
+  const data = []; let p = basePrice * 0.9;
   const now = new Date();
   for (let i = 59; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const o = p;
+    const d = new Date(now); d.setDate(d.getDate() - i);
     const c = p * (1 + (Math.random() - 0.48) * 0.03);
-    const h = Math.max(o, c) * (1 + Math.random() * 0.012);
-    const l = Math.min(o, c) * (1 - Math.random() * 0.012);
-    const v = Math.floor(Math.random() * 5e6 + 5e5);
-    data.push({
-      date: `${d.getMonth() + 1}/${d.getDate()}`,
-      close: Math.round(c),
-      high: Math.round(h),
-      low: Math.round(l),
-      volume: v,
-    });
+    data.push({ date: `${d.getMonth()+1}/${d.getDate()}`, close: Math.round(c), volume: Math.floor(Math.random()*5e6+5e5) });
     p = c;
   }
-  // SMA 계산
   return data.map((d, i, arr) => {
     const closes = arr.map(x => x.close);
-    const sma5 = i >= 4 ? closes.slice(i - 4, i + 1).reduce((a, b) => a + b, 0) / 5 : null;
-    const sma20 = i >= 19 ? closes.slice(i - 19, i + 1).reduce((a, b) => a + b, 0) / 20 : null;
-    // RSI 간이
+    const sma5 = i >= 4 ? closes.slice(i-4,i+1).reduce((a,b)=>a+b,0)/5 : null;
+    const sma20 = i >= 19 ? closes.slice(i-19,i+1).reduce((a,b)=>a+b,0)/20 : null;
     let rsi = null;
-    if (i >= 14) {
-      let ag = 0, al = 0;
-      for (let j = i - 13; j <= i; j++) {
-        const diff = closes[j] - closes[j - 1];
-        if (diff >= 0) ag += diff; else al -= diff;
-      }
-      ag /= 14; al /= 14;
-      rsi = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
-    }
+    if (i >= 14) { let ag=0,al=0; for(let j=i-13;j<=i;j++){const diff=closes[j]-closes[j-1];if(diff>=0)ag+=diff;else al-=diff}ag/=14;al/=14;rsi=al===0?100:100-100/(1+ag/al); }
     return { ...d, sma5, sma20, rsi };
   });
 }
 
-// ─── 차트 컴포넌트 ──────────────────────────────────────────
-const tt = { background: "#fff", border: "1px solid rgba(0,0,0,.08)", borderRadius: 10, fontSize: 11, padding: "8px 12px", boxShadow: "0 4px 12px rgba(0,0,0,.06)" };
-
 function StockChart({ price }) {
   const [chartData] = useState(() => generateChartData(price || 70000));
   const [chartTab, setChartTab] = useState("price");
-
   return (
     <div>
-      {/* 차트 탭 */}
       <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-        {[
-          { id: "price", label: "가격" },
-          { id: "rsi", label: "RSI" },
-          { id: "volume", label: "거래량" },
-        ].map(t => (
+        {[{id:"price",label:"가격"},{id:"rsi",label:"RSI"},{id:"volume",label:"거래량"}].map(t => (
           <button key={t.id} onClick={() => setChartTab(t.id)} style={{
             padding: "5px 14px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 500,
-            background: chartTab === t.id ? C.blue : C.grey,
-            color: chartTab === t.id ? "#fff" : C.sub,
+            background: chartTab === t.id ? C.blue : C.grey, color: chartTab === t.id ? "#fff" : C.sub,
             cursor: "pointer", fontFamily: "'Pretendard',sans-serif",
           }}>{t.label}</button>
         ))}
       </div>
-
-      {/* 가격 차트 */}
-      {chartTab === "price" && (
-        <>
-          <ResponsiveContainer width="100%" height={220}>
-            <ComposedChart data={chartData} margin={{ left: -10, right: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
-              <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={8} />
-              <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} domain={["auto", "auto"]} />
-              <Tooltip contentStyle={tt} formatter={(v, n) => [v ? `₩${Math.round(v).toLocaleString()}` : "—", { close: "종가", sma5: "5일선", sma20: "20일선" }[n] || n]} />
-              <Line type="monotone" dataKey="close" stroke={C.blue} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="sma5" stroke={C.amber} strokeWidth={1.2} dot={false} strokeDasharray="4 2" />
-              <Line type="monotone" dataKey="sma20" stroke={C.purple} strokeWidth={1.2} dot={false} strokeDasharray="4 2" />
-            </ComposedChart>
-          </ResponsiveContainer>
-          <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 6, fontSize: 10 }}>
-            <span style={{ color: C.blue }}>● 종가</span>
-            <span style={{ color: C.amber }}>┄ 5일선</span>
-            <span style={{ color: C.purple }}>┄ 20일선</span>
-          </div>
-        </>
-      )}
-
-      {/* RSI 차트 */}
+      {chartTab === "price" && (<>
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={chartData} margin={{ left: -10, right: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
+            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={8} />
+            <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} tickFormatter={v=>`${(v/1000).toFixed(0)}K`} domain={["auto","auto"]} />
+            <Tooltip contentStyle={tt} formatter={(v,n) => [v?`₩${Math.round(v).toLocaleString()}`:"—",{close:"종가",sma5:"5일선",sma20:"20일선"}[n]||n]} />
+            <Line type="monotone" dataKey="close" stroke={C.blue} strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="sma5" stroke={C.amber} strokeWidth={1.2} dot={false} strokeDasharray="4 2" />
+            <Line type="monotone" dataKey="sma20" stroke={C.purple} strokeWidth={1.2} dot={false} strokeDasharray="4 2" />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <div style={{ display:"flex", gap:14, justifyContent:"center", marginTop:6, fontSize:10 }}>
+          <span style={{color:C.blue}}>● 종가</span><span style={{color:C.amber}}>┄ 5일선</span><span style={{color:C.purple}}>┄ 20일선</span>
+        </div>
+      </>)}
       {chartTab === "rsi" && (
         <ResponsiveContainer width="100%" height={220}>
-          <ComposedChart data={chartData.filter(d => d.rsi !== null)} margin={{ left: -10, right: 4 }}>
+          <ComposedChart data={chartData.filter(d=>d.rsi!==null)} margin={{left:-10,right:4}}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
-            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={5} />
-            <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} />
-            <ReferenceLine y={70} stroke={C.red} strokeDasharray="3 3" strokeOpacity={0.4} />
-            <ReferenceLine y={30} stroke={C.green} strokeDasharray="3 3" strokeOpacity={0.4} />
-            <Tooltip contentStyle={tt} formatter={v => [v?.toFixed(1), "RSI"]} />
+            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{fill:C.mt}} interval={5} />
+            <YAxis stroke={C.lt} fontSize={9} tick={{fill:C.mt}} domain={[0,100]} ticks={[0,30,50,70,100]} />
+            <ReferenceLine y={70} stroke={C.red} strokeDasharray="3 3" strokeOpacity={.4} />
+            <ReferenceLine y={30} stroke={C.green} strokeDasharray="3 3" strokeOpacity={.4} />
+            <Tooltip contentStyle={tt} formatter={v=>[v?.toFixed(1),"RSI"]} />
             <Line type="monotone" dataKey="rsi" stroke={C.blue} strokeWidth={1.8} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       )}
-
-      {/* 거래량 차트 */}
       {chartTab === "volume" && (
         <ResponsiveContainer width="100%" height={220}>
-          <ComposedChart data={chartData.slice(-30)} margin={{ left: -10, right: 4 }}>
+          <ComposedChart data={chartData.slice(-30)} margin={{left:-10,right:4}}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,.05)" />
-            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} interval={4} />
-            <YAxis stroke={C.lt} fontSize={9} tick={{ fill: C.mt }} tickFormatter={v => `${(v / 10000).toFixed(0)}만`} />
-            <Tooltip contentStyle={tt} formatter={v => [v?.toLocaleString(), "거래량"]} />
-            <Bar dataKey="volume" fill={C.blue} fillOpacity={0.3} radius={[3, 3, 0, 0]} />
+            <XAxis dataKey="date" stroke={C.lt} fontSize={9} tick={{fill:C.mt}} interval={4} />
+            <YAxis stroke={C.lt} fontSize={9} tick={{fill:C.mt}} tickFormatter={v=>`${(v/10000).toFixed(0)}만`} />
+            <Tooltip contentStyle={tt} formatter={v=>[v?.toLocaleString(),"거래량"]} />
+            <Bar dataKey="volume" fill={C.blue} fillOpacity={.3} radius={[3,3,0,0]} />
           </ComposedChart>
         </ResponsiveContainer>
       )}
+    </div>
+  );
+}
+
+// ─── 이퀄라이저 슬라이더 ────────────────────────────────────
+function EqSlider({ icon, label, desc, value, onChange, min = 0, max = 100, unit = "", color = C.blue }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Icon name={icon} size={18} color={C.sub} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+            <div style={{ fontSize: 11, color: C.mt }}>{desc}</div>
+          </div>
+        </div>
+        <span className="mono" style={{ fontSize: 16, fontWeight: 700, color }}>{value}{unit}</span>
+      </div>
+      <div style={{ position: "relative", height: 32, display: "flex", alignItems: "center" }}>
+        <input type="range" min={min} max={max} value={value} onChange={e => onChange(parseInt(e.target.value))}
+          style={{
+            width: "100%", height: 6, appearance: "none", background: C.grey,
+            borderRadius: 3, outline: "none", cursor: "pointer",
+          }} />
+        <style>{`
+          input[type=range]::-webkit-slider-thumb {
+            appearance: none; width: 22px; height: 22px; border-radius: 50%;
+            background: ${color}; border: 3px solid #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,.15); cursor: pointer;
+          }
+        `}</style>
+      </div>
+      {/* 바 시각화 */}
+      <div style={{ height: 4, borderRadius: 2, background: C.grey, marginTop: -14, pointerEvents: "none" }}>
+        <div style={{ height: "100%", borderRadius: 2, width: `${((value - min) / (max - min)) * 100}%`, background: `linear-gradient(90deg, ${color}66, ${color})`, transition: "width .15s" }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── 설정 페이지 ────────────────────────────────────────────
+function SettingsPage({ settings, setSettings, onClose, signalCount }) {
+  const [local, setLocal] = useState({ ...settings });
+  const totalW = local.w_breakout + local.w_volumeZ + local.w_trend + local.w_volContraction + local.w_sectorRS;
+
+  const update = (key, val) => setLocal({ ...local, [key]: val });
+
+  const handleApply = () => {
+    setSettings(local);
+    saveSettings(local);
+    onClose();
+  };
+
+  const handleReset = () => {
+    setLocal({ ...DEFAULT_SETTINGS });
+  };
+
+  return (
+    <div className="fade-up">
+      <div style={{ marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: C.blue, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+          <Icon name="tune" size={16} color={C.blue} />
+          나만의 시그널 설정
+        </p>
+        <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, lineHeight: 1.3 }}>
+          투자 스타일에 맞게 조절하세요
+        </h2>
+      </div>
+
+      {/* ── 전략 설정 ── */}
+      <div style={{ ...cardStyle, padding: 24, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 18 }}>
+          <Icon name="target" size={20} color={C.green} />
+          <span style={{ fontSize: 15, fontWeight: 700 }}>전략 설정</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 12, color: C.mt, fontWeight: 500, marginBottom: 6 }}>목표 수익률</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[10, 15, 20, 30].map(v => (
+                <button key={v} onClick={() => update("targetReturn", v)} style={{
+                  flex: 1, padding: "8px 0", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600,
+                  background: local.targetReturn === v ? C.blue : C.grey,
+                  color: local.targetReturn === v ? "#fff" : C.sub,
+                  cursor: "pointer", fontFamily: "'Pretendard',sans-serif",
+                }}>+{v}%</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: C.mt, fontWeight: 500, marginBottom: 6 }}>보유 기간</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[10, 20, 40, 60].map(v => (
+                <button key={v} onClick={() => update("holdingDays", v)} style={{
+                  flex: 1, padding: "8px 0", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600,
+                  background: local.holdingDays === v ? C.blue : C.grey,
+                  color: local.holdingDays === v ? "#fff" : C.sub,
+                  cursor: "pointer", fontFamily: "'Pretendard',sans-serif",
+                }}>{v}일</button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <EqSlider icon="security" label="최소 확률 필터" desc="이 확률 이상만 시그널에 표시" value={local.minProbability} onChange={v => update("minProbability", v)} min={20} max={80} unit="%" color={C.green} />
+        </div>
+        <div>
+          <EqSlider icon="do_not_disturb_on" label="손절 라인" desc="목표 손절 비율" value={local.stopLoss} onChange={v => update("stopLoss", v)} min={2} max={15} unit="%" color={C.red} />
+        </div>
+      </div>
+
+      {/* ── 이퀄라이저: 가중치 ── */}
+      <div style={{ ...cardStyle, padding: 24, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+          <Icon name="equalizer" size={20} color={C.blue} />
+          <span style={{ fontSize: 15, fontWeight: 700 }}>피처 가중치</span>
+        </div>
+        <p style={{ fontSize: 12, color: C.mt, marginBottom: 18 }}>어떤 지표를 더 중요하게 볼 건지 조절하세요</p>
+
+        {/* 가중치 합계 표시 */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          padding: "8px 0", marginBottom: 16,
+          background: totalW === 100 ? C.greenL : C.amberL, borderRadius: 10,
+        }}>
+          <Icon name={totalW === 100 ? "check_circle" : "warning"} size={16} color={totalW === 100 ? C.green : C.amber} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: totalW === 100 ? C.green : C.amber }}>
+            가중치 합계: {totalW}% {totalW !== 100 && "(100%가 되어야 해요)"}
+          </span>
+        </div>
+
+        <EqSlider icon="trending_up" label="돌파 거리" desc="120일 고점 대비 위치" value={local.w_breakout} onChange={v => update("w_breakout", v)} max={50} unit="%" color={C.blue} />
+        <EqSlider icon="bar_chart" label="거래량 Z-score" desc="평균 대비 거래량 급증도" value={local.w_volumeZ} onChange={v => update("w_volumeZ", v)} max={50} unit="%" color={C.green} />
+        <EqSlider icon="show_chart" label="추세 강도" desc="이동평균 정배열 + 기울기" value={local.w_trend} onChange={v => update("w_trend", v)} max={50} unit="%" color={C.purple} />
+        <EqSlider icon="compress" label="변동성 수축" desc="볼린저밴드 수축도" value={local.w_volContraction} onChange={v => update("w_volContraction", v)} max={50} unit="%" color={C.amber} />
+        <EqSlider icon="group_work" label="섹터 상대강도" desc="업종 내 상대 위치" value={local.w_sectorRS} onChange={v => update("w_sectorRS", v)} max={50} unit="%" color={C.red} />
+      </div>
+
+      {/* ── 이퀄라이저: 최소 기준값 ── */}
+      <div style={{ ...cardStyle, padding: 24, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+          <Icon name="filter_alt" size={20} color={C.purple} />
+          <span style={{ fontSize: 15, fontWeight: 700 }}>최소 기준값</span>
+        </div>
+        <p style={{ fontSize: 12, color: C.mt, marginBottom: 18 }}>각 지표가 이 값 이상이어야 시그널에 포함돼요</p>
+
+        <EqSlider icon="trending_up" label="돌파 거리 최소" desc="이 점수 이상만 포함" value={local.min_breakout} onChange={v => update("min_breakout", v)} unit="" color={C.blue} />
+        <EqSlider icon="bar_chart" label="거래량 Z 최소" desc="이 점수 이상만 포함" value={local.min_volumeZ} onChange={v => update("min_volumeZ", v)} unit="" color={C.green} />
+        <EqSlider icon="show_chart" label="추세 강도 최소" desc="이 점수 이상만 포함" value={local.min_trend} onChange={v => update("min_trend", v)} unit="" color={C.purple} />
+        <EqSlider icon="compress" label="변동성 수축 최소" desc="이 점수 이상만 포함" value={local.min_volContraction} onChange={v => update("min_volContraction", v)} unit="" color={C.amber} />
+        <EqSlider icon="group_work" label="섹터 강도 최소" desc="이 점수 이상만 포함" value={local.min_sectorRS} onChange={v => update("min_sectorRS", v)} unit="" color={C.red} />
+      </div>
+
+      {/* 프리셋 */}
+      <div style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+          <Icon name="bookmarks" size={20} color={C.amber} />
+          <span style={{ fontSize: 15, fontWeight: 700 }}>프리셋</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          {[
+            { label: "안전형", desc: "추세 중심", icon: "shield", color: C.green, preset: { w_breakout: 15, w_volumeZ: 10, w_trend: 35, w_volContraction: 20, w_sectorRS: 20, minProbability: 60 } },
+            { label: "균형형", desc: "기본 설정", icon: "balance", color: C.blue, preset: { ...DEFAULT_SETTINGS } },
+            { label: "공격형", desc: "돌파 중심", icon: "bolt", color: C.red, preset: { w_breakout: 35, w_volumeZ: 25, w_trend: 15, w_volContraction: 15, w_sectorRS: 10, minProbability: 35 } },
+          ].map((p, i) => (
+            <button key={i} onClick={() => setLocal({ ...local, ...p.preset })} style={{
+              padding: 14, borderRadius: 14, border: `1px solid ${C.bd}`, background: C.card,
+              cursor: "pointer", textAlign: "center", transition: "all .15s",
+              fontFamily: "'Pretendard',sans-serif",
+            }}>
+              <Icon name={p.icon} size={24} color={p.color} />
+              <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6 }}>{p.label}</div>
+              <div style={{ fontSize: 10, color: C.mt, marginTop: 2 }}>{p.desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 하단 버튼 */}
+      <div style={{ display: "flex", gap: 10, position: "sticky", bottom: 16, zIndex: 10 }}>
+        <button onClick={handleReset} style={{
+          flex: 1, padding: "14px 0", borderRadius: 14, border: `1px solid ${C.bd}`,
+          background: C.card, color: C.sub, fontSize: 14, fontWeight: 600, cursor: "pointer",
+          fontFamily: "'Pretendard',sans-serif",
+        }}>
+          <Icon name="restart_alt" size={18} color={C.sub} style={{ verticalAlign: -4, marginRight: 4 }} />
+          초기화
+        </button>
+        <button onClick={handleApply} style={{
+          flex: 2, padding: "14px 0", borderRadius: 14, border: "none",
+          background: C.blue, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer",
+          fontFamily: "'Pretendard',sans-serif",
+          boxShadow: "0 4px 16px rgba(49,130,246,.25)",
+        }}>
+          적용하기
+        </button>
+      </div>
     </div>
   );
 }
@@ -156,15 +389,15 @@ export default function Home() {
   const [mode, setMode] = useState("demo");
   const [sector, setSector] = useState("전체");
   const [selected, setSelected] = useState(null);
+  const [page, setPage] = useState("main"); // main | settings
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showApiSettings, setShowApiSettings] = useState(false);
   const [config, setConfig] = useState({ appKey: "", appSecret: "" });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
-  const cardStyle = {
-    background: C.card, borderRadius: 16,
-    boxShadow: "0 1px 3px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.02)",
-  };
+  // localStorage에서 설정 로드
+  useEffect(() => { setSettings(loadSettings()); }, []);
 
   const loadSignals = useCallback(async () => {
     setLoading(true);
@@ -191,8 +424,10 @@ export default function Home() {
     setAnalyzing(false);
   };
 
-  const filtered = sector === "전체" ? signals : signals.filter(s => s.sector === sector);
-  const detail = selected ? signals.find(s => s.code === selected) : null;
+  // 설정 반영된 시그널
+  const processedSignals = filterBySettings(signals, settings);
+  const filtered = sector === "전체" ? processedSignals : processedSignals.filter(s => s.sector === sector);
+  const detail = selected ? processedSignals.find(s => s.code === selected) : null;
   const strongCount = filtered.filter(s => s.probability >= 70).length;
   const avgProb = filtered.length > 0 ? Math.round(filtered.reduce((a, b) => a + b.probability, 0) / filtered.length) : 0;
 
@@ -206,58 +441,55 @@ export default function Home() {
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {detail && (
-            <button onClick={() => { setSelected(null); setAnalysis(null); }}
+          {(detail || page === "settings") && (
+            <button onClick={() => { setSelected(null); setAnalysis(null); setPage("main"); }}
               style={{ padding: "6px 8px", borderRadius: 8, border: "none", background: C.grey, cursor: "pointer", display: "flex" }}>
               <Icon name="arrow_back" size={20} color={C.sub} />
             </button>
           )}
-          <div style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: `linear-gradient(135deg, ${C.blue}, #00b4d8)`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
+          <div style={{ width: 28, height: 28, borderRadius: 8, background: `linear-gradient(135deg, ${C.blue}, #00b4d8)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Icon name="query_stats" size={18} color="#fff" />
           </div>
           <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: -0.3 }}>QuantSignal</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{
-            padding: "3px 8px", borderRadius: 6,
-            background: mode === "live" ? C.greenL : C.amberL,
-            display: "flex", alignItems: "center", gap: 4,
-          }}>
+          <div style={{ padding: "3px 8px", borderRadius: 6, background: mode === "live" ? C.greenL : C.amberL, display: "flex", alignItems: "center", gap: 4 }}>
             <span style={{ width: 5, height: 5, borderRadius: "50%", background: mode === "live" ? C.green : C.amber }} />
             <span style={{ fontSize: 11, color: mode === "live" ? C.green : C.amber, fontWeight: 600 }}>{mode === "live" ? "LIVE" : "DEMO"}</span>
           </div>
-          <button onClick={() => setShowSettings(!showSettings)}
+          {page !== "settings" && (
+            <button onClick={() => setPage("settings")}
+              style={{ padding: 6, borderRadius: 8, border: "none", background: C.grey, cursor: "pointer", display: "flex" }}>
+              <Icon name="tune" size={20} color={C.sub} />
+            </button>
+          )}
+          <button onClick={() => setShowApiSettings(!showApiSettings)}
             style={{ padding: 6, borderRadius: 8, border: "none", background: C.grey, cursor: "pointer", display: "flex" }}>
             <Icon name="settings" size={20} color={C.sub} />
           </button>
         </div>
       </header>
 
-      {showSettings && (
+      {showApiSettings && (
         <div style={{ padding: "16px 20px", background: "#fff", borderBottom: `1px solid ${C.bd}` }} className="fade-up">
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 140 }}>
               <label style={{ fontSize: 11, color: C.mt, display: "block", marginBottom: 4 }}>KIS APP KEY</label>
-              <input type="password" value={config.appKey} onChange={e => setConfig({ ...config, appKey: e.target.value })}
+              <input type="password" value={config.appKey} onChange={e => setConfig({...config, appKey: e.target.value})}
                 style={{ width: "100%", padding: "8px 12px", border: `1px solid ${C.bd}`, borderRadius: 10, fontSize: 13, fontFamily: "'DM Mono'", outline: "none" }} />
             </div>
             <div style={{ flex: 1, minWidth: 140 }}>
               <label style={{ fontSize: 11, color: C.mt, display: "block", marginBottom: 4 }}>KIS APP SECRET</label>
-              <input type="password" value={config.appSecret} onChange={e => setConfig({ ...config, appSecret: e.target.value })}
+              <input type="password" value={config.appSecret} onChange={e => setConfig({...config, appSecret: e.target.value})}
                 style={{ width: "100%", padding: "8px 12px", border: `1px solid ${C.bd}`, borderRadius: 10, fontSize: 13, fontFamily: "'DM Mono'", outline: "none" }} />
             </div>
           </div>
-          <p style={{ fontSize: 11, color: C.mt, marginTop: 8 }}>Vercel 환경변수로도 설정 가능해요</p>
         </div>
       )}
 
       <main style={{ padding: "20px 20px 40px", maxWidth: 640, margin: "0 auto" }}>
 
-        {/* ══════════ 로딩 ══════════ */}
+        {/* ═══ 로딩 ═══ */}
         {loading && (
           <div style={{ textAlign: "center", padding: "80px 20px" }} className="fade-up">
             <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
@@ -265,8 +497,13 @@ export default function Home() {
           </div>
         )}
 
-        {/* ══════════ 시그널 목록 ══════════ */}
-        {!loading && !detail && (<>
+        {/* ═══ 설정 페이지 ═══ */}
+        {!loading && page === "settings" && (
+          <SettingsPage settings={settings} setSettings={setSettings} onClose={() => setPage("main")} signalCount={processedSignals.length} />
+        )}
+
+        {/* ═══ 시그널 목록 ═══ */}
+        {!loading && page === "main" && !detail && (<>
           <div className="fade-up" style={{ marginBottom: 20 }}>
             <p style={{ fontSize: 13, color: C.blue, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
               <Icon name="auto_awesome" size={16} color={C.blue} />
@@ -293,7 +530,7 @@ export default function Home() {
 
           <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 16 }}>
             {SECTORS.map(s => {
-              const has = s === "전체" || signals.some(sig => sig.sector === s);
+              const has = s === "전체" || processedSignals.some(sig => sig.sector === s);
               if (!has) return null;
               return <button key={s} onClick={() => setSector(s)} style={{
                 padding: "6px 14px", borderRadius: 20, fontSize: 13, border: "none",
@@ -303,21 +540,35 @@ export default function Home() {
             })}
           </div>
 
+          {/* 설정 요약 바 */}
           <div className="fade-up" style={{
             display: "flex", alignItems: "center", gap: 8,
             padding: "10px 14px", background: C.blueL, borderRadius: 12, marginBottom: 14,
-          }}>
+            cursor: "pointer",
+          }} onClick={() => setPage("settings")}>
             <Icon name="tune" size={18} color={C.blue} />
             <span style={{ fontSize: 12, color: C.blueD, fontWeight: 500 }}>
-              목표수익 <strong>+15%</strong> · 보유기간 <strong>20일</strong> 기준
+              목표 <strong>+{settings.targetReturn}%</strong> · 보유 <strong>{settings.holdingDays}일</strong> · 손절 <strong>{settings.stopLoss}%</strong> · 최소확률 <strong>{settings.minProbability}%</strong>
             </span>
+            <Icon name="chevron_right" size={16} color={C.blue} style={{ marginLeft: "auto" }} />
           </div>
+
+          {filtered.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <Icon name="search_off" size={48} color={C.lt} />
+              <p style={{ fontSize: 14, color: C.sub, marginTop: 12 }}>현재 설정으로는 시그널이 없어요</p>
+              <p style={{ fontSize: 12, color: C.mt, marginTop: 4 }}>기준값을 낮추거나 설정을 변경해 보세요</p>
+              <button onClick={() => setPage("settings")} style={{
+                marginTop: 12, padding: "10px 20px", borderRadius: 12, border: "none",
+                background: C.blue, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Pretendard',sans-serif",
+              }}>설정 변경</button>
+            </div>
+          )}
 
           {filtered.map((s, i) => (
             <div key={s.code} className="fade-up" style={{
               ...cardStyle, padding: 20, marginBottom: 10, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 16,
-              animationDelay: `${i * 0.04}s`,
+              display: "flex", alignItems: "center", gap: 16, animationDelay: `${i * 0.04}s`,
             }} onClick={() => { setSelected(s.code); setAnalysis(null); }}>
               <div style={{ position: "relative", flexShrink: 0 }}>
                 <svg width="56" height="56" viewBox="0 0 56 56" style={{ transform: "rotate(-90deg)" }}>
@@ -334,7 +585,7 @@ export default function Home() {
                 </div>
                 <div style={{ fontSize: 12.5, color: C.sub, lineHeight: 1.4 }}>{s.reason}</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
-                  <span className="mono" style={{ fontSize: 12, color: C.tx, fontWeight: 500 }}>₩{s.price?.toLocaleString()}</span>
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 500 }}>₩{s.price?.toLocaleString()}</span>
                   <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: s.chg >= 0 ? C.green : C.red }}>{s.chg >= 0 ? "+" : ""}{s.chg}%</span>
                   <span style={{ fontSize: 11, color: C.lt }}>·</span>
                   <span style={{ fontSize: 11, color: C.mt }}>스코어 {s.score}</span>
@@ -355,10 +606,9 @@ export default function Home() {
           </div>
         </>)}
 
-        {/* ══════════ 종목 상세 ══════════ */}
-        {!loading && detail && (
+        {/* ═══ 종목 상세 ═══ */}
+        {!loading && page === "main" && detail && (
           <div className="fade-up">
-            {/* 종목 헤더 */}
             <div style={{ ...cardStyle, padding: 24, marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
@@ -390,7 +640,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* ★ 차트 ★ */}
+            {/* 차트 */}
             <div style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
                 <Icon name="candlestick_chart" size={20} color={C.blue} />
@@ -408,18 +658,18 @@ export default function Home() {
                 <span className="mono" style={{ fontSize: 13, color: C.blue, fontWeight: 600, marginLeft: "auto" }}>{detail.score}/100</span>
               </div>
               {[
-                { icon: "trending_up", label: "돌파 거리", desc: "120일 고점 대비 위치", val: detail.features?.breakout || 50 },
-                { icon: "bar_chart", label: "거래량 Z-score", desc: `평균 대비 ${detail.volZRaw || "1.0"}배`, val: detail.features?.volumeZ || 50, raw: `${detail.volZRaw || "1.0"}x` },
-                { icon: "show_chart", label: "추세 강도", desc: "MA20 vs MA60 정배열", val: detail.features?.trend || 50 },
-                { icon: "compress", label: "변동성 수축", desc: "볼린저밴드 수축도", val: detail.features?.volContraction || 50 },
-                { icon: "group_work", label: "섹터 상대강도", desc: "업종 내 상대 위치", val: detail.features?.sectorRS || 50 },
+                { icon: "trending_up", label: "돌파 거리", desc: "120일 고점 대비", val: detail.features?.breakout || 50, w: settings.w_breakout },
+                { icon: "bar_chart", label: "거래량 Z-score", desc: `평균 대비 ${detail.volZRaw||"1.0"}배`, val: detail.features?.volumeZ || 50, raw: `${detail.volZRaw||"1.0"}x`, w: settings.w_volumeZ },
+                { icon: "show_chart", label: "추세 강도", desc: "MA20 vs MA60", val: detail.features?.trend || 50, w: settings.w_trend },
+                { icon: "compress", label: "변동성 수축", desc: "볼린저밴드 수축도", val: detail.features?.volContraction || 50, w: settings.w_volContraction },
+                { icon: "group_work", label: "섹터 상대강도", desc: "업종 내 위치", val: detail.features?.sectorRS || 50, w: settings.w_sectorRS },
               ].map((f, i) => (
                 <div key={i} style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <Icon name={f.icon} size={18} color={C.sub} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{f.label}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{f.label} <span style={{ fontSize: 10, color: C.mt, fontWeight: 400 }}>가중치 {f.w}%</span></div>
                         <div style={{ fontSize: 11, color: C.mt }}>{f.desc}</div>
                       </div>
                     </div>
@@ -442,22 +692,22 @@ export default function Home() {
                 <div style={{ padding: 16, background: C.greenL, borderRadius: 14 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
                     <Icon name="flag" size={16} color={C.green} />
-                    <span style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>목표가 (+15%)</span>
+                    <span style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>목표가 (+{settings.targetReturn}%)</span>
                   </div>
-                  <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: C.green }}>₩{Math.round(detail.price * 1.15).toLocaleString()}</div>
+                  <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: C.green }}>₩{Math.round(detail.price * (1 + settings.targetReturn / 100)).toLocaleString()}</div>
                 </div>
                 <div style={{ padding: 16, background: C.redL, borderRadius: 14 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
                     <Icon name="shield" size={16} color={C.red} />
-                    <span style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>손절가 (-5%)</span>
+                    <span style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>손절가 (-{settings.stopLoss}%)</span>
                   </div>
-                  <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: C.red }}>₩{Math.round(detail.price * 0.95).toLocaleString()}</div>
+                  <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: C.red }}>₩{Math.round(detail.price * (1 - settings.stopLoss / 100)).toLocaleString()}</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 16, padding: "12px 0" }}>
                 {[
-                  { icon: "schedule", label: "보유기간", val: "20일" },
-                  { icon: "balance", label: "손익비", val: "3 : 1" },
+                  { icon: "schedule", label: "보유기간", val: `${settings.holdingDays}일` },
+                  { icon: "balance", label: "손익비", val: `${(settings.targetReturn / settings.stopLoss).toFixed(1)} : 1` },
                   { icon: "pie_chart", label: "권장비중", val: "10%" },
                 ].map((m, i) => (
                   <div key={i} style={{ flex: 1, textAlign: "center" }}>
@@ -474,7 +724,6 @@ export default function Home() {
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
                 <Icon name="history" size={20} color={C.purple} />
                 <span style={{ fontSize: 15, fontWeight: 700 }}>백테스트 성과</span>
-                <span style={{ fontSize: 11, color: C.mt, marginLeft: "auto" }}>유사 패턴 기준</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 {[
@@ -486,7 +735,7 @@ export default function Home() {
                   { label: "분석기간", val: "3년", color: C.tx },
                 ].map((m, i) => (
                   <div key={i} style={{ padding: 14, background: C.bg, borderRadius: 12, textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: C.mt, marginBottom: 6, fontWeight: 500 }}>{m.label}</div>
+                    <div style={{ fontSize: 10, color: C.mt, marginBottom: 6 }}>{m.label}</div>
                     <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: m.color }}>{m.val}</div>
                   </div>
                 ))}
@@ -500,7 +749,6 @@ export default function Home() {
                 <span style={{ fontSize: 15, fontWeight: 700 }}>AI 분석</span>
                 <span style={{ fontSize: 11, color: C.mt, marginLeft: "auto" }}>뉴스 · 시황 반영</span>
               </div>
-
               {!analysis && !analyzing && (
                 <button onClick={() => handleAnalyze(detail)} style={{
                   width: "100%", padding: "14px 0", borderRadius: 14, border: "none",
@@ -509,34 +757,23 @@ export default function Home() {
                   fontFamily: "'Pretendard',sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   boxShadow: "0 4px 16px rgba(49,130,246,.25)",
                 }}>
-                  <Icon name="auto_awesome" size={20} color="#fff" />
-                  AI에게 분석 요청 (뉴스 포함)
+                  <Icon name="auto_awesome" size={20} color="#fff" />AI에게 분석 요청
                 </button>
               )}
-
               {analyzing && (
                 <div style={{ textAlign: "center", padding: "20px 0" }}>
                   <span className="spinner" />
-                  <p style={{ fontSize: 13, color: C.sub, marginTop: 10 }}>AI가 뉴스와 차트를 종합 분석하고 있어요...</p>
+                  <p style={{ fontSize: 13, color: C.sub, marginTop: 10 }}>AI가 뉴스와 차트를 종합 분석 중...</p>
                 </div>
               )}
-
               {analysis && !analyzing && (
-                <div className="fade-in" style={{ fontSize: 13, lineHeight: 2, color: C.tx, whiteSpace: "pre-wrap", wordBreak: "keep-all" }}>
-                  {analysis}
-                </div>
+                <div className="fade-in" style={{ fontSize: 13, lineHeight: 2, color: C.tx, whiteSpace: "pre-wrap", wordBreak: "keep-all" }}>{analysis}</div>
               )}
             </div>
 
-            {/* 주의사항 */}
-            <div style={{
-              padding: "14px 16px", background: C.amberL, borderRadius: 14,
-              display: "flex", alignItems: "flex-start", gap: 10,
-            }}>
+            <div style={{ padding: "14px 16px", background: C.amberL, borderRadius: 14, display: "flex", alignItems: "flex-start", gap: 10 }}>
               <Icon name="info" size={20} color={C.amber} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.7 }}>
-                확률은 과거 데이터 기반 통계 추정값이며 미래 수익을 보장하지 않아요. 분산 투자와 손절 규칙을 꼭 지켜주세요.
-              </div>
+              <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.7 }}>확률은 과거 데이터 기반 통계 추정값이며 미래 수익을 보장하지 않아요.</div>
             </div>
           </div>
         )}
