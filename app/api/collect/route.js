@@ -21,10 +21,12 @@ function todayStr() {
 }
 
 export async function GET(request) {
-  // Cron Job 인증 (Vercel Cron은 CRON_SECRET 헤더로 인증)
+  // Cron Job 인증 (헤더 또는 쿼리 파라미터)
   const authHeader = request.headers.get("authorization");
+  const { searchParams } = new URL(request.url);
+  const querySecret = searchParams.get("secret");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && querySecret !== cronSecret) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
